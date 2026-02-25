@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Screen Audio → Whisper → Diarization → OpenWebUI Summary</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>Local Screen Audio Transcriber</h1>
+      <div class="subtitle">Local Whisper (Transformers.js) • Optional diarization • Summaries via OpenWebUI</div>
+    </div>
+    <div class="statusbar">
+      <div class="pill" id="gpuPill">GPU: …</div>
+      <div class="pill" id="asrPill">ASR: idle</div>
+      <div class="pill" id="diaPill">Diarization: off</div>
+      <div class="pill" id="owuiPill">OpenWebUI: not connected</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Capture</h2>
+
+      <div class="row">
+        <button id="btnStart">Start capture</button>
+        <button id="btnStop" disabled>Stop</button>
+        <button id="btnClear">Clear</button>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label>ASR model (Whisper)</label>
+          <select id="asrModel">
+            <option value="Xenova/whisper-tiny.en">Xenova/whisper-tiny.en</option>
+            <option value="Xenova/whisper-base.en" selected>Xenova/whisper-base.en</option>
+            <option value="Xenova/whisper-small.en">Xenova/whisper-small.en</option>
+          </select>
+          <div class="hint">Smaller = faster. “.en” models are English-only.</div>
+        </div>
+
+        <div class="field">
+          <label>Device preference</label>
+          <select id="devicePref">
+            <option value="auto" selected>auto (prefer WebGPU)</option>
+            <option value="webgpu">webgpu</option>
+            <option value="wasm">wasm (CPU)</option>
+          </select>
+          <div class="hint">If WebGPU errors, switch to WASM.</div>
+        </div>
+
+        <div class="field">
+          <label>Window seconds</label>
+          <input id="winSec" type="number" min="5" max="60" value="15" />
+          <div class="hint">Chunk size sent to Whisper.</div>
+        </div>
+
+        <div class="field">
+          <label>Overlap seconds</label>
+          <input id="ovlSec" type="number" min="0" max="10" value="3" />
+          <div class="hint">Overlap helps avoid cutting words.</div>
+        </div>
+
+        <div class="field">
+          <label>Word timestamps</label>
+          <select id="timestamps">
+            <option value="off">off</option>
+            <option value="word" selected>word</option>
+            <option value="chunk">chunk</option>
+          </select>
+          <div class="hint">Word timestamps enable tight sync and diarization alignment; slower.</div>
+        </div>
+
+        <div class="field">
+          <label>Auto-transcribe</label>
+          <select id="autoRun">
+            <option value="on" selected>on</option>
+            <option value="off">off (manual trigger)</option>
+          </select>
+          <div class="hint">If off, you can “Transcribe now”.</div>
+        </div>
+
+        <div class="field">
+          <label>Enable diarization</label>
+          <select id="diarize">
+            <option value="off" selected>off</option>
+            <option value="on">on (local embeddings)</option>
+          </select>
+          <div class="hint">Best-effort diarization via local speaker embeddings + online clustering.</div>
+        </div>
+
+        <div class="field">
+          <label>Speaker similarity threshold</label>
+          <input id="spkThresh" type="number" min="0.5" max="0.95" step="0.01" value="0.78" />
+          <div class="hint">Higher = fewer speakers (more merging). Typical 0.75–0.85.</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnTranscribe" disabled>Transcribe now</button>
+        <div class="spacer"></div>
+        <button id="btnExport">Export (.json)</button>
+        <button id="btnExportTxt">Export (.txt)</button>
+      </div>
+
+      <details class="diag">
+        <summary>Diagnostics</summary>
+        <pre id="diagOut"></pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>OpenWebUI</h2>
+
+      <div class="grid2">
+        <div class="field">
+          <label>Base URL</label>
+          <input id="owBaseUrl" placeholder="https://openwebui.example.com" />
+          <div class="hint">Must be reachable from the browser. CORS must allow this page’s origin.</div>
+        </div>
+
+        <div class="field">
+          <label>API key (not stored)</label>
+          <input id="owApiKey" type="password" placeholder="Paste OpenWebUI key" />
+          <div class="hint">Kept in memory only. Reload clears it.</div>
+        </div>
+
+        <div class="field">
+          <label>Model</label>
+          <select id="owModel">
+            <option value="">(load models)</option>
+          </select>
+          <div class="hint">Uses <code>/api/models</code>.</div>
+        </div>
+
+        <div class="field">
+          <label>Summary interval (sec)</label>
+          <input id="sumEverySec" type="number" min="15" max="600" value="60" />
+          <div class="hint">Summarizes “delta” transcript periodically.</div>
+        </div>
+
+        <div class="field">
+          <label>Summary style</label>
+          <select id="sumStyle">
+            <option value="notes" selected>Meeting notes</option>
+            <option value="bullets">Bullets</option>
+            <option value="actions">Action items</option>
+            <option value="json">JSON (structured)</option>
+          </select>
+          <div class="hint">Prompt template changes output.</div>
+        </div>
+
+        <div class="field">
+          <label>Streaming</label>
+          <select id="owStream">
+            <option value="on" selected>on (SSE)</option>
+            <option value="off">off</option>
+          </select>
+          <div class="hint">If CORS/proxy strips SSE, turn off.</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnLoadModels">Load models</button>
+        <button id="btnTestOWUI">Test connection</button>
+        <div class="spacer"></div>
+        <button id="btnSummarize">Summarize now</button>
+        <button id="btnClearSummary">Clear summary</button>
+      </div>
+
+      <details class="diag">
+        <summary>CORS help</summary>
+        <div class="help">
+          <p>If you see a CORS error, your OpenWebUI instance must allow this page’s origin via <code>CORS_ALLOW_ORIGIN</code>, or you must serve this UI from the same origin as OpenWebUI.</p>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel wide">
+      <h2>Transcript (timestamped)</h2>
+      <div class="row">
+        <div class="hint">Transcript includes timestamps and (optionally) speaker tags. Export for structured data.</div>
+        <div class="spacer"></div>
+        <label class="chk"><input type="checkbox" id="autoScroll" checked /> Auto-scroll</label>
+        <label class="chk"><input type="checkbox" id="showRaw" /> Show raw (no tags)</label>
+      </div>
+      <textarea id="transcript" spellcheck="false" placeholder="Transcript will appear here…"></textarea>
+    </section>
+
+    <section class="panel wide">
+      <h2>Summary</h2>
+      <textarea id="summary" spellcheck="false" placeholder="Summary will appear here…"></textarea>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot">
+      <span>Audio stays local. Only transcript text is sent to OpenWebUI for summarization.</span>
+    </div>
+  </footer>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
